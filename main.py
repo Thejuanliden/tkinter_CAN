@@ -1,84 +1,46 @@
 #!/usr/bin/env python3
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-import threading
-import can
-from can import Listener
-import logging
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+from datetime import datetime
+from typing import Dict
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-PGN_DM1 = 0xFECA
-PGN_DM2 = 0xFECB
-PGN_DM3 = 0xFECD
-
-
-class J1939Listener(Listener):
-    def __init__(self, text_widget, filter_dm1=True):
-        self.text_widget = text_widget
-        self.filter_dm1 = filter_dm1
-        self.running = False
-        self.lock = threading.Lock()
-
-    def on_message_received(self, msg):
-        if not self.running:
-            return
-
-        if self.filter_dm1 and msg.is_extended_id:
-            pgn = (msg.arbitration_id >> 8) & 0x3FFFF
-            if pgn == PGN_DM1:
-                return
-
-        with self.lock:
-            timestamp = f"{msg.timestamp:.4f}"
-            if msg.is_extended_id:
-                pgn = (msg.arbitration_id >> 8) & 0x3FFFF
-                priority = (msg.arbitration_id >> 26) & 0x7
-                pdu_format = msg.arbitration_id & 0xFF
-                pdu_specific = (msg.arbitration_id >> 8) & 0xFF
-                source = (msg.arbitration_id >> 8) & 0xFF
-                dest = (msg.arbitration_id >> 16) & 0xFF
-
-                pgn_str = f"PGN:{pgn:05X}"
-                data_hex = " ".join(f"{b:02X}" for b in msg.data)
-                line = f"[{timestamp}] P:{priority} PF:{pdu_format:02X} PS:{pdu_specific:02X} SA:{source:02X} DA:{dest:02X} {data_hex}\n"
-            else:
-                data_hex = " ".join(f"{b:02X}" for b in msg.data)
-                line = f"[{timestamp}] ID:{msg.arbitration_id:08X} DLC:{msg.dlc} {data_hex}\n"
-
-            self.text_widget.insert(tk.END, line)
-            self.text_widget.see(tk.END)
-
-    def start(self):
-        with self.lock:
-            self.running = True
-
-    def stop(self):
-        with self.lock:
-            self.running = False
+from can_service import CANService, DecodedMessage
 
 
 class CANControlPanel:
     def __init__(self, root):
         self.root = root
         self.root.title("J1939 CAN Control Panel")
-        self.root.geometry("900x600")
+        self.root.geometry("1000x700")
 
-        self.bus = None
-        self.listener = None
-        self.notifier = None
-        self.is_listening = False
+        self.can_service = CANService()
+        self.can_service.set_message_callback(self._on_can_message)
+        self.can_service.set_status_callback(self._on_status_message)
+
+        self.show_updates_only = tk.BooleanVar(value=True)
+        self.filter_dm1_var = tk.BooleanVar(value=True)
+        self.show_raw_var = tk.BooleanVar(value=True)
+
+        self._message_rows: Dict[int, str] = {}
 
         self.create_widgets()
 
     def create_widgets(self):
+        toolbar = ttk.Frame(self.root)
+        toolbar.pack(fill=tk.X, padx=5, pady=2)
+
+        ttk.Button(toolbar, text="Load DBC File", command=self.load_dbc).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.dbc_label = ttk.Label(toolbar, text="No DBC loaded", foreground="gray")
+        self.dbc_label.pack(side=tk.LEFT, padx=10)
+
         control_frame = ttk.LabelFrame(self.root, text="CAN Connection", padding=10)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Label(control_frame, text="Channel:").grid(row=0, column=0, sticky=tk.W)
         self.channel_var = tk.StringVar(value="0")
-        ttk.Entry(control_frame, textvariable=self.channel_var, width=10).grid(
+        ttk.Entry(control_frame, textvariable=self.channel_var, width=8).grid(
             row=0, column=1, padx=5
         )
 
@@ -96,218 +58,232 @@ class CANControlPanel:
         self.status_label = ttk.Label(
             control_frame, text="Disconnected", foreground="red"
         )
-        self.status_label.grid(row=0, column=5)
-
-        listener_frame = ttk.LabelFrame(self.root, text="CAN Listener", padding=10)
-        listener_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        self.filter_dm1_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            listener_frame, text="Filter out DM1 messages", variable=self.filter_dm1_var
-        ).pack(anchor=tk.W)
-
-        btn_frame = ttk.Frame(listener_frame)
-        btn_frame.pack(fill=tk.X, pady=5)
+        self.status_label.grid(row=0, column=5, padx=10)
 
         self.listen_btn = ttk.Button(
-            btn_frame,
+            control_frame,
             text="Start Listening",
             command=self.toggle_listening,
             state=tk.DISABLED,
         )
-        self.listen_btn.pack(side=tk.LEFT, padx=5)
+        self.listen_btn.grid(row=0, column=6, padx=10)
 
-        ttk.Button(btn_frame, text="Clear", command=self.clear_text).pack(
+        options_frame = ttk.LabelFrame(self.root, text="Display Options", padding=5)
+        options_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        ttk.Checkbutton(
+            options_frame, text="Show updates only", variable=self.show_updates_only
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(
+            options_frame, text="Filter DM1", variable=self.filter_dm1_var
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(
+            options_frame, text="Show raw data", variable=self.show_raw_var
+        ).pack(side=tk.LEFT, padx=10)
+
+        messages_frame = ttk.LabelFrame(self.root, text="CAN Messages", padding=5)
+        messages_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        tree_frame = ttk.Frame(messages_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        columns = ("timestamp", "can_id", "name", "update", "decoded")
+        self.message_tree = ttk.Treeview(
+            tree_frame, columns=columns, show="headings", height=15
+        )
+
+        self.message_tree.heading("timestamp", text="Time")
+        self.message_tree.heading("can_id", text="CAN ID")
+        self.message_tree.heading("name", text="Message")
+        self.message_tree.heading("update", text="Update")
+        self.message_tree.heading("decoded", text="Decoded Values")
+
+        self.message_tree.column("timestamp", width=80)
+        self.message_tree.column("can_id", width=100)
+        self.message_tree.column("name", width=150)
+        self.message_tree.column("update", width=60)
+        self.message_tree.column("decoded", width=500)
+
+        scrollbar = ttk.Scrollbar(
+            tree_frame, orient=tk.VERTICAL, command=self.message_tree.yview
+        )
+        self.message_tree.configure(yscrollcommand=scrollbar.set)
+
+        self.message_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_frame = ttk.Frame(messages_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(btn_frame, text="Clear Messages", command=self.clear_messages).pack(
             side=tk.LEFT, padx=5
         )
+        ttk.Button(
+            btn_frame, text="Refresh Display", command=self.refresh_display
+        ).pack(side=tk.LEFT, padx=5)
 
-        self.text_area = scrolledtext.ScrolledText(
-            listener_frame, height=20, width=100, font=("Courier", 9)
+        log_frame = ttk.LabelFrame(self.root, text="Log", padding=5)
+        log_frame.pack(fill=tk.X, padx=10, pady=5, ipady=50)
+
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame, height=6, font=("Courier", 8)
         )
-        self.text_area.pack(fill=tk.BOTH, expand=True)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
 
         dm_frame = ttk.LabelFrame(self.root, text="DM1 Control", padding=10)
         dm_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(dm_frame, text="Target ECU Address (hex):").pack(side=tk.LEFT, padx=5)
+        ttk.Label(dm_frame, text="Target ECU (hex):").pack(side=tk.LEFT, padx=5)
         self.target_ecu_var = tk.StringVar(value="00")
         ttk.Entry(dm_frame, textvariable=self.target_ecu_var, width=5).pack(
             side=tk.LEFT
         )
 
-        ttk.Button(dm_frame, text="Clear DM1 (Send DM2)", command=self.clear_dm1).pack(
-            side=tk.LEFT, padx=20
+        ttk.Button(dm_frame, text="Clear DM1", command=self.clear_dm1).pack(
+            side=tk.LEFT, padx=10
         )
-
         ttk.Button(dm_frame, text="Request DM1", command=self.request_dm1).pack(
             side=tk.LEFT, padx=5
         )
-
-        ttk.Button(dm_frame, text="Clear All DM (DM3)", command=self.clear_all_dm).pack(
+        ttk.Button(dm_frame, text="Clear All DM", command=self.clear_all_dm).pack(
             side=tk.LEFT, padx=5
         )
 
+    def load_dbc(self):
+        filepath = filedialog.askopenfilename(
+            title="Select DBC File",
+            filetypes=[("DBC files", "*.dbc"), ("All files", "*.*")],
+        )
+        if filepath:
+            if self.can_service.load_dbc(filepath):
+                self.dbc_label.config(text=filepath.split("/")[-1], foreground="green")
+            else:
+                messagebox.showerror(
+                    "DBC Error",
+                    "Failed to load DBC file. Install cantools: pip install cantools",
+                )
+
     def toggle_connection(self):
-        if self.bus is None:
-            self.connect()
-        else:
+        if self.can_service.is_connected():
             self.disconnect()
+        else:
+            self.connect()
 
     def connect(self):
         try:
             channel = int(self.channel_var.get())
             baudrate = int(self.baudrate_var.get())
 
-            self.bus = can.interface.Bus(
-                bustype="ixxat", channel=channel, bitrate=baudrate
+            if self.can_service.connect(channel, baudrate):
+                self.connect_btn.config(text="Disconnect")
+                self.status_label.config(text="Connected", foreground="green")
+                self.listen_btn.config(state=tk.NORMAL)
+        except ValueError:
+            messagebox.showerror(
+                "Invalid Input", "Please enter valid numbers for channel and baudrate"
             )
 
-            self.connect_btn.config(text="Disconnect")
-            self.status_label.config(text="Connected", foreground="green")
-            self.listen_btn.config(state=tk.NORMAL)
-
-            self.log(f"Connected to IXXAT CAN channel {channel} at {baudrate} baud")
-
-        except Exception as e:
-            messagebox.showerror("Connection Error", f"Failed to connect: {e}")
-            logger.error(f"Connection error: {e}")
-
     def disconnect(self):
-        if self.is_listening:
+        if self.can_service.is_listening:
             self.toggle_listening()
-
-        if self.bus:
-            self.bus.shutdown()
-            self.bus = None
-
+        self.can_service.disconnect()
         self.connect_btn.config(text="Connect")
         self.status_label.config(text="Disconnected", foreground="red")
         self.listen_btn.config(state=tk.DISABLED)
-        self.log("Disconnected from CAN")
 
     def toggle_listening(self):
-        if not self.is_listening:
+        if not self.can_service.is_listening:
             self.start_listening()
         else:
             self.stop_listening()
 
     def start_listening(self):
-        if self.bus is None:
-            return
-
-        self.listener = J1939Listener(
-            self.text_area, filter_dm1=self.filter_dm1_var.get()
-        )
-        self.notifier = can.Notifier(self.bus, [self.listener])
-        self.listener.start()
-        self.is_listening = True
+        self.can_service.start_listening(filter_dm1=self.filter_dm1_var.get())
         self.listen_btn.config(text="Stop Listening")
-        self.log("Started listening to CAN traffic")
 
     def stop_listening(self):
-        if self.listener:
-            self.listener.stop()
-        if self.notifier:
-            self.notifier.stop()
-        self.is_listening = False
+        self.can_service.stop_listening()
         self.listen_btn.config(text="Start Listening")
-        self.log("Stopped listening to CAN traffic")
 
-    def clear_text(self):
-        self.text_area.delete(1.0, tk.END)
+    def clear_messages(self):
+        for item in self.message_tree.get_children():
+            self.message_tree.delete(item)
+        self._message_rows.clear()
 
-    def log(self, message):
-        self.text_area.insert(tk.END, f"[LOG] {message}\n")
-        self.text_area.see(tk.END)
+    def refresh_display(self):
+        pass
 
-    def get_target_ecu(self):
+    def _on_can_message(self, msg: DecodedMessage):
+        def update_gui():
+            if self.show_updates_only.get() and not msg.is_update:
+                return
+
+            timestamp = datetime.fromtimestamp(msg.timestamp).strftime("%H:%M:%S.%f")[
+                :-3
+            ]
+            can_id_str = f"{msg.can_id:08X}"
+
+            if msg.dbc_name:
+                name = msg.dbc_name
+                decoded_str = ", ".join(
+                    f"{k}={v}" for k, v in msg.decoded_fields.items()
+                )
+            else:
+                name = ""
+                decoded_str = ""
+
+            update_char = "*" if msg.is_update else " "
+
+            if msg.can_id in self._message_rows:
+                item = self._message_rows[msg.can_id]
+                self.message_tree.item(
+                    item, values=(timestamp, can_id_str, name, update_char, decoded_str)
+                )
+            else:
+                item = self.message_tree.insert(
+                    "",
+                    0,
+                    values=(timestamp, can_id_str, name, update_char, decoded_str),
+                )
+                self._message_rows[msg.can_id] = item
+
+        self.root.after(0, update_gui)
+
+    def _on_status_message(self, message: str):
+        def update_log():
+            self.log_text.insert(
+                tk.END, f"{datetime.now().strftime('%H:%M:%S')} - {message}\n"
+            )
+            self.log_text.see(tk.END)
+
+        self.root.after(0, update_log)
+
+    def get_target_ecu(self) -> int:
         try:
             return int(self.target_ecu_var.get(), 16)
         except ValueError:
             messagebox.showerror(
                 "Invalid Input", "Please enter a valid hex address (e.g., 00, FF)"
             )
-            return None
-
-    def send_j1939_request(self, pgn, dest=0xFF):
-        if self.bus is None:
-            messagebox.showwarning("Not Connected", "Please connect to CAN first")
-            return False
-
-        request_data = [
-            pgn & 0xFF,
-            (pgn >> 8) & 0xFF,
-            (pgn >> 16) & 0xFF,
-            0xFF,
-            0xFF,
-            0xFF,
-            0xFF,
-            0xFF,
-        ]
-
-        arb_id = (7 << 26) | (0xEA << 8) | (dest << 8) | 0xFF
-
-        msg = can.Message(arbitration_id=arb_id, data=request_data, is_extended_id=True)
-
-        try:
-            self.bus.send(msg)
-            self.log(f"Sent PGN {pgn:06X} request to destination {dest:02X}")
-            return True
-        except Exception as e:
-            messagebox.showerror("Send Error", f"Failed to send message: {e}")
-            return False
-
-    def send_j1939_command(self, pgn, data, dest=None):
-        if self.bus is None:
-            messagebox.showwarning("Not Connected", "Please connect to CAN first")
-            return False
-
-        if dest is None:
-            dest = self.get_target_ecu()
-            if dest is None:
-                return False
-
-        while len(data) < 8:
-            data.append(0xFF)
-
-        arb_id = (7 << 26) | (pgn << 8) | dest
-
-        msg = can.Message(arbitration_id=arb_id, data=data[:8], is_extended_id=True)
-
-        try:
-            self.bus.send(msg)
-            self.log(f"Sent PGN {pgn:06X} command to ECU {dest:02X}")
-            return True
-        except Exception as e:
-            messagebox.showerror("Send Error", f"Failed to send message: {e}")
-            return False
+            return -1
 
     def clear_dm1(self):
         dest = self.get_target_ecu()
-        if dest is None:
-            return
-
-        self.send_j1939_command(PGN_DM2, [0x01], dest=dest)
+        if dest >= 0:
+            self.can_service.clear_dm1(dest)
 
     def request_dm1(self):
         dest = self.get_target_ecu()
-        if dest is None:
-            return
-
-        self.send_j1939_request(PGN_DM1, dest=dest)
+        if dest >= 0:
+            self.can_service.request_dm1(dest)
 
     def clear_all_dm(self):
         dest = self.get_target_ecu()
-        if dest is None:
-            return
-
-        self.send_j1939_command(PGN_DM3, [0x01], dest=dest)
+        if dest >= 0:
+            self.can_service.clear_all_dm(dest)
 
     def on_close(self):
-        if self.is_listening:
-            self.stop_listening()
-        if self.bus:
-            self.disconnect()
+        self.can_service.disconnect()
         self.root.destroy()
 
 

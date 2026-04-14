@@ -25,14 +25,14 @@ class J1939Listener(Listener):
         if not self.running:
             return
 
-        if self.filter_dm1 and msg.is_j1939:
+        if self.filter_dm1 and msg.is_extended_id:
             pgn = (msg.arbitration_id >> 8) & 0x3FFFF
             if pgn == PGN_DM1:
                 return
 
         with self.lock:
             timestamp = f"{msg.timestamp:.4f}"
-            if msg.is_j1939:
+            if msg.is_extended_id:
                 pgn = (msg.arbitration_id >> 8) & 0x3FFFF
                 priority = (msg.arbitration_id >> 26) & 0x7
                 pdu_format = msg.arbitration_id & 0xFF
@@ -247,9 +247,7 @@ class CANControlPanel:
 
         arb_id = (7 << 26) | (0xEA << 8) | (dest << 8) | 0xFF
 
-        msg = can.Message(
-            arbitration_id=arb_id, data=request_data, is_extended_id=True, is_j1939=True
-        )
+        msg = can.Message(arbitration_id=arb_id, data=request_data, is_extended_id=True)
 
         try:
             self.bus.send(msg)
@@ -274,9 +272,7 @@ class CANControlPanel:
 
         arb_id = (7 << 26) | (pgn << 8) | dest
 
-        msg = can.Message(
-            arbitration_id=arb_id, data=data[:8], is_extended_id=True, is_j1939=True
-        )
+        msg = can.Message(arbitration_id=arb_id, data=data[:8], is_extended_id=True)
 
         try:
             self.bus.send(msg)

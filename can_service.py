@@ -2,9 +2,10 @@ import can
 from can import Listener
 import threading
 import logging
-from dataclasses import dataclass, field
 from typing import Dict, Optional, Callable, Any
-from enum import Enum
+from dataclasses import dataclass
+
+from can_types import CANMessageType, DecodedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +17,6 @@ PGN_DM4 = 0xFECE
 CAN_ID_DM1 = 0x18FECA00
 CAN_ID_DM2 = 0x18FECB00
 CAN_ID_DM3 = 0x18FECD00
-
-
-class CANMessageType(Enum):
-    J1939 = "j1939"
-    STANDARD = "standard"
-
-
-@dataclass
-class DecodedMessage:
-    timestamp: float
-    can_id: int
-    message_type: CANMessageType
-    raw_data: bytes
-    decoded_fields: Dict[str, Any] = field(default_factory=dict)
-    dbc_name: Optional[str] = None
-    is_update: bool = True
 
 
 @dataclass

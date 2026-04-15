@@ -2,9 +2,11 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Optional
 
-from can_service import CANService, DecodedMessage
+from can_types import DecodedMessage
+from can_service import CANService
+from can_simulator import CANSimulator
 
 
 class CANControlPanel:
@@ -13,13 +15,17 @@ class CANControlPanel:
         self.root.title("J1939 CAN Control Panel")
         self.root.geometry("1000x700")
 
-        self.can_service = CANService()
-        self.can_service.set_message_callback(self._on_can_message)
-        self.can_service.set_status_callback(self._on_status_message)
+        self._can_service: Optional[CANService] = None
+        self._simulator: Optional[CANSimulator] = None
+        self._current_backend: Optional[str] = None
+
+        self._dbcan_decoder = None
+        self._dbc_message_ids = {}
 
         self.show_updates_only = tk.BooleanVar(value=True)
         self.filter_dm1_var = tk.BooleanVar(value=True)
         self.show_raw_var = tk.BooleanVar(value=True)
+        self.backend_var = tk.StringVar(value="ixxat")
 
         self._message_rows: Dict[int, str] = {}
 
@@ -38,27 +44,44 @@ class CANControlPanel:
         control_frame = ttk.LabelFrame(self.root, text="CAN Connection", padding=10)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        ttk.Label(control_frame, text="Channel:").grid(row=0, column=0, sticky=tk.W)
-        self.channel_var = tk.StringVar(value="0")
-        ttk.Entry(control_frame, textvariable=self.channel_var, width=8).grid(
-            row=0, column=1, padx=5
+        ttk.Label(control_frame, text="Backend:").grid(row=0, column=0, sticky=tk.W)
+        backend_combo = ttk.Combobox(
+            control_frame,
+            textvariable=self.backend_var,
+            values=["ixxat", "simulator"],
+            state="readonly",
+            width=12,
         )
+        backend_combo.grid(row=0, column=1, padx=5)
+        backend_combo.bind("<<ComboboxSelected>>", self._on_backend_change)
 
-        ttk.Label(control_frame, text="Baudrate:").grid(row=0, column=2, padx=(10, 0))
-        self.baudrate_var = tk.StringVar(value="250000")
-        ttk.Entry(control_frame, textvariable=self.baudrate_var, width=10).grid(
-            row=0, column=3, padx=5
+        ttk.Label(control_frame, text="Channel:").grid(
+            row=0, column=2, sticky=tk.W, padx=(10, 0)
         )
+        self.channel_var = tk.StringVar(value="0")
+        self.channel_entry = ttk.Entry(
+            control_frame, textvariable=self.channel_var, width=8
+        )
+        self.channel_entry.grid(row=0, column=3, padx=5)
+
+        ttk.Label(control_frame, text="Baudrate:").grid(
+            row=0, column=4, sticky=tk.W, padx=(10, 0)
+        )
+        self.baudrate_var = tk.StringVar(value="250000")
+        self.baudrate_entry = ttk.Entry(
+            control_frame, textvariable=self.baudrate_var, width=10
+        )
+        self.baudrate_entry.grid(row=0, column=5, padx=5)
 
         self.connect_btn = ttk.Button(
             control_frame, text="Connect", command=self.toggle_connection
         )
-        self.connect_btn.grid(row=0, column=4, padx=10)
+        self.connect_btn.grid(row=0, column=6, padx=10)
 
         self.status_label = ttk.Label(
             control_frame, text="Disconnected", foreground="red"
         )
-        self.status_label.grid(row=0, column=5, padx=10)
+        self.status_label.grid(row=0, column=7, padx=10)
 
         self.listen_btn = ttk.Button(
             control_frame,
@@ -66,7 +89,7 @@ class CANControlPanel:
             command=self.toggle_listening,
             state=tk.DISABLED,
         )
-        self.listen_btn.grid(row=0, column=6, padx=10)
+        self.listen_btn.grid(row=0, column=8, padx=10)
 
         options_frame = ttk.LabelFrame(self.root, text="Display Options", padding=5)
         options_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -75,7 +98,10 @@ class CANControlPanel:
             options_frame, text="Show updates only", variable=self.show_updates_only
         ).pack(side=tk.LEFT, padx=10)
         ttk.Checkbutton(
-            options_frame, text="Filter DM1", variable=self.filter_dm1_var
+            options_frame,
+            text="Filter DM1",
+            variable=self.filter_dm1_var,
+            command=self._on_filter_change,
         ).pack(side=tk.LEFT, padx=10)
         ttk.Checkbutton(
             options_frame, text="Show raw data", variable=self.show_raw_var
@@ -98,7 +124,7 @@ class CANControlPanel:
         self.message_tree.heading("update", text="Update")
         self.message_tree.heading("decoded", text="Decoded Values")
 
-        self.message_tree.column("timestamp", width=80)
+        self.message_tree.column("timestamp", width=100)
         self.message_tree.column("can_id", width=100)
         self.message_tree.column("name", width=150)
         self.message_tree.column("update", width=60)
@@ -118,9 +144,9 @@ class CANControlPanel:
         ttk.Button(btn_frame, text="Clear Messages", command=self.clear_messages).pack(
             side=tk.LEFT, padx=5
         )
-        ttk.Button(
-            btn_frame, text="Refresh Display", command=self.refresh_display
-        ).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Clear Cache", command=self.clear_cache).pack(
+            side=tk.LEFT, padx=5
+        )
 
         log_frame = ttk.LabelFrame(self.root, text="Log", padding=5)
         log_frame.pack(fill=tk.X, padx=10, pady=5, ipady=50)
@@ -149,69 +175,199 @@ class CANControlPanel:
             side=tk.LEFT, padx=5
         )
 
+    def _on_backend_change(self, event=None):
+        backend = self.backend_var.get()
+        if backend == "simulator":
+            self.channel_entry.config(state="disabled")
+            self.baudrate_entry.config(state="disabled")
+            self._log(f"Switched to simulator backend")
+        else:
+            self.channel_entry.config(state="normal")
+            self.baudrate_entry.config(state="normal")
+            self._log(f"Switched to IXXAT backend")
+
+    def _on_filter_change(self):
+        if (
+            self._current_backend == "simulator"
+            and self._simulator
+            and self._simulator.is_running()
+        ):
+            self._simulator.stop()
+            self._simulator.start(filter_dm1=self.filter_dm1_var.get())
+
     def load_dbc(self):
         filepath = filedialog.askopenfilename(
             title="Select DBC File",
             filetypes=[("DBC files", "*.dbc"), ("All files", "*.*")],
         )
         if filepath:
-            if self.can_service.load_dbc(filepath):
+            try:
+                import cantools
+
+                self._dbcan_decoder = cantools.database.load_file(filepath)
+                self._dbc_message_ids = {
+                    msg.frame_id: msg for msg in self._dbcan_decoder.messages
+                }
                 self.dbc_label.config(text=filepath.split("/")[-1], foreground="green")
-            else:
-                messagebox.showerror(
-                    "DBC Error",
-                    "Failed to load DBC file. Install cantools: pip install cantools",
+                self._log(
+                    f"Loaded DBC: {filepath} with {len(self._dbc_message_ids)} messages"
                 )
 
-    def toggle_connection(self):
-        if self.can_service.is_connected():
-            self.disconnect()
+                if self._simulator:
+                    self._simulator._dbc_decoder = self._dbcan_decoder
+                    self._simulator._dbc_message_ids = self._dbc_message_ids
+
+            except ImportError:
+                messagebox.showerror(
+                    "Error", "cantools not installed. Run: pip install cantools"
+                )
+            except Exception as e:
+                messagebox.showerror("DBC Error", f"Failed to load DBC: {e}")
+
+    def _get_backend(self):
+        backend = self.backend_var.get()
+
+        if backend == "simulator":
+            if self._simulator is None:
+                self._simulator = CANSimulator()
+                self._simulator.set_message_callback(self._on_can_message)
+                self._simulator.set_status_callback(self._on_status_message)
+            return self._simulator
         else:
-            self.connect()
+            if self._can_service is None:
+                self._can_service = CANService()
+                self._can_service.set_message_callback(self._on_can_message)
+                self._can_service.set_status_callback(self._on_status_message)
+            return self._can_service
+
+    def toggle_connection(self):
+        backend = self.backend_var.get()
+
+        if backend == "simulator":
+            if self._simulator and self._simulator.is_running():
+                self.disconnect()
+            else:
+                self.connect()
+        else:
+            if self._can_service and self._can_service.is_connected():
+                self.disconnect()
+            else:
+                self.connect()
 
     def connect(self):
-        try:
-            channel = int(self.channel_var.get())
-            baudrate = int(self.baudrate_var.get())
+        backend = self.backend_var.get()
 
-            if self.can_service.connect(channel, baudrate):
-                self.connect_btn.config(text="Disconnect")
-                self.status_label.config(text="Connected", foreground="green")
-                self.listen_btn.config(state=tk.NORMAL)
-        except ValueError:
-            messagebox.showerror(
-                "Invalid Input", "Please enter valid numbers for channel and baudrate"
-            )
+        if backend == "simulator":
+            self._simulator = CANSimulator()
+            self._simulator.set_message_callback(self._on_can_message)
+            self._simulator.set_status_callback(self._on_status_message)
+
+            if self._dbc_message_ids:
+                self._simulator._dbc_decoder = self._dbcan_decoder
+                self._simulator._dbc_message_ids = self._dbc_message_ids
+
+            self.connect_btn.config(text="Disconnect")
+            self.status_label.config(text="Simulator Ready", foreground="blue")
+            self.listen_btn.config(state=tk.NORMAL)
+            self._current_backend = "simulator"
+            self._log("Simulator connected")
+        else:
+            try:
+                channel = int(self.channel_var.get())
+                baudrate = int(self.baudrate_var.get())
+
+                self._can_service = CANService()
+                self._can_service.set_message_callback(self._on_can_message)
+                self._can_service.set_status_callback(self._on_status_message)
+
+                if self._can_service.connect(channel, baudrate):
+                    self.connect_btn.config(text="Disconnect")
+                    self.status_label.config(text="Connected", foreground="green")
+                    self.listen_btn.config(state=tk.NORMAL)
+                    self._current_backend = "ixxat"
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid Input",
+                    "Please enter valid numbers for channel and baudrate",
+                )
 
     def disconnect(self):
-        if self.can_service.is_listening:
-            self.toggle_listening()
-        self.can_service.disconnect()
-        self.connect_btn.config(text="Connect")
-        self.status_label.config(text="Disconnected", foreground="red")
-        self.listen_btn.config(state=tk.DISABLED)
+        backend = self.backend_var.get()
+
+        if backend == "simulator":
+            if self._simulator:
+                if self._simulator.is_running():
+                    self._simulator.stop()
+                self._simulator = None
+            self.connect_btn.config(text="Connect")
+            self.status_label.config(text="Disconnected", foreground="red")
+            self.listen_btn.config(state=tk.DISABLED)
+            self._current_backend = None
+            self._log("Simulator disconnected")
+        else:
+            if self._can_service:
+                self._can_service.disconnect()
+                self._can_service = None
+            self.connect_btn.config(text="Connect")
+            self.status_label.config(text="Disconnected", foreground="red")
+            self.listen_btn.config(state=tk.DISABLED)
+            self._current_backend = None
+            self._log("Disconnected")
 
     def toggle_listening(self):
-        if not self.can_service.is_listening:
-            self.start_listening()
+        backend = self.backend_var.get()
+
+        if backend == "simulator":
+            if self._simulator and self._simulator.is_running():
+                self.stop_listening()
+            else:
+                self.start_listening()
         else:
-            self.stop_listening()
+            if self._can_service and self._can_service.is_listening:
+                self.stop_listening()
+            else:
+                self.start_listening()
 
     def start_listening(self):
-        self.can_service.start_listening(filter_dm1=self.filter_dm1_var.get())
-        self.listen_btn.config(text="Stop Listening")
+        backend = self.backend_var.get()
+        filter_dm1 = self.filter_dm1_var.get()
+
+        if backend == "simulator":
+            if self._simulator:
+                self._simulator.start(filter_dm1=filter_dm1)
+                self.listen_btn.config(text="Stop Listening")
+                self.status_label.config(text="Simulator Running", foreground="blue")
+        else:
+            if self._can_service:
+                self._can_service.start_listening(filter_dm1=filter_dm1)
+                self.listen_btn.config(text="Stop Listening")
 
     def stop_listening(self):
-        self.can_service.stop_listening()
-        self.listen_btn.config(text="Start Listening")
+        backend = self.backend_var.get()
+
+        if backend == "simulator":
+            if self._simulator:
+                self._simulator.stop()
+                self.listen_btn.config(text="Start Listening")
+                self.status_label.config(text="Simulator Ready", foreground="blue")
+        else:
+            if self._can_service:
+                self._can_service.stop_listening()
+                self.listen_btn.config(text="Start Listening")
 
     def clear_messages(self):
         for item in self.message_tree.get_children():
             self.message_tree.delete(item)
         self._message_rows.clear()
 
-    def refresh_display(self):
-        pass
+    def clear_cache(self):
+        backend = self.backend_var.get()
+        if backend == "simulator":
+            if self._simulator:
+                self._simulator._message_cache.clear()
+                self._log("Simulator cache cleared")
+        self._log("Display cache cleared")
+        self.clear_messages()
 
     def _on_can_message(self, msg: DecodedMessage):
         def update_gui():
@@ -225,12 +381,16 @@ class CANControlPanel:
 
             if msg.dbc_name:
                 name = msg.dbc_name
+            else:
+                name = msg.dbc_name or ""
+
+            if msg.decoded_fields:
                 decoded_str = ", ".join(
                     f"{k}={v}" for k, v in msg.decoded_fields.items()
                 )
             else:
-                name = ""
-                decoded_str = ""
+                raw_hex = " ".join(f"{b:02X}" for b in msg.raw_data)
+                decoded_str = f"HEX: {raw_hex}"
 
             update_char = "*" if msg.is_update else " "
 
@@ -250,13 +410,13 @@ class CANControlPanel:
         self.root.after(0, update_gui)
 
     def _on_status_message(self, message: str):
-        def update_log():
-            self.log_text.insert(
-                tk.END, f"{datetime.now().strftime('%H:%M:%S')} - {message}\n"
-            )
-            self.log_text.see(tk.END)
+        self.root.after(0, lambda: self._log(message))
 
-        self.root.after(0, update_log)
+    def _log(self, message: str):
+        self.log_text.insert(
+            tk.END, f"{datetime.now().strftime('%H:%M:%S')} - {message}\n"
+        )
+        self.log_text.see(tk.END)
 
     def get_target_ecu(self) -> int:
         try:
@@ -270,20 +430,47 @@ class CANControlPanel:
     def clear_dm1(self):
         dest = self.get_target_ecu()
         if dest >= 0:
-            self.can_service.clear_dm1(dest)
+            backend = self.backend_var.get()
+            if backend == "simulator":
+                if self._simulator:
+                    self._simulator.clear_dm1(dest)
+            else:
+                if self._can_service:
+                    self._can_service.clear_dm1(dest)
 
     def request_dm1(self):
         dest = self.get_target_ecu()
         if dest >= 0:
-            self.can_service.request_dm1(dest)
+            backend = self.backend_var.get()
+            if backend == "simulator":
+                if self._simulator:
+                    self._simulator.request_dm1(dest)
+            else:
+                if self._can_service:
+                    self._can_service.request_dm1(dest)
 
     def clear_all_dm(self):
         dest = self.get_target_ecu()
         if dest >= 0:
-            self.can_service.clear_all_dm(dest)
+            backend = self.backend_var.get()
+            if backend == "simulator":
+                if self._simulator:
+                    self._simulator.clear_all_dm(dest)
+            else:
+                if self._can_service:
+                    self._can_service.clear_all_dm(dest)
 
     def on_close(self):
-        self.can_service.disconnect()
+        backend = self.backend_var.get()
+        if backend == "simulator":
+            if self._simulator:
+                if self._simulator.is_running():
+                    self._simulator.stop()
+                self._simulator = None
+        else:
+            if self._can_service:
+                self._can_service.disconnect()
+                self._can_service = None
         self.root.destroy()
 
 

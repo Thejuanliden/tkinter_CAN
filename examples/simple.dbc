@@ -1,0 +1,26 @@
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 2020 EngineData: 8 Vector__XXX
+ SG_ EngineSpeed : 0|16@1- (0.125,0) [0|8031.875] "rpm" Vector__XXX
+ SG_ EngineTorque : 16|8@1- (-125,0) [-125|125] "%" Vector__XXX
+ SG_ EngineLoad : 24|8@1- (0,0) [0|100] "%" Vector__XXX
+ SG_ CoolantTemp : 32|8@1- (-40,0) [-40|210] "C" Vector__XXX
+
+BO_ 1536 Aftertreatment1: 8 Vector__XXX
+ SG_ DPFStatus : 0|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ DOCStatus : 2|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ EGRStatus : 4|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ IntakeTemp : 8|8@1- (-40,0) [-40|210] "C" Vector__XXX
+ SG_ IntakePressure : 16|8@1- (0.05,-125) [-125|125] "kPa" Vector__XXX
+ SG_ OutletTemp : 24|8@1- (-40,0) [-40|651] "C" Vector__XXX
+
+BO_ 1800 DM1_Active: 8 Vector__XXX
+ SG_ SPN : 0|18@1- (1,0) [0|524287] "" Vector__XXX
+ SG_ FMI : 18|5@1- (1,0) [0|31] "" Vector__XXX
+ SG_ CM : 23|1@1- (1,0) [0|1] "" Vector__XXX

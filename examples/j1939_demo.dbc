@@ -1,0 +1,57 @@
+VERSION ""
+
+NS_ :
+
+BS_:
+
+BU_:
+
+BO_ 217172736 EngineData: 8 Vector__XXX
+ SG_ EngineSpeed : 0|16@1- (0.125,0) [0|8031.875] "rpm" Vector__XXX
+ SG_ EngineTorqueMode : 16|4@1- (1,0) [0|15] "" Vector__XXX
+ SG_ DriverTorque : 24|8@1- (-125,0) [-125|125] "%" Vector__XXX
+ SG_ ActualTorque : 32|8@1- (-125,0) [-125|125] "%" Vector__XXX
+ SG_ EngineStarterMode : 40|4@1- (1,0) [0|9] "" Vector__XXX
+ SG_ EngineDemandTorque : 48|8@1- (-125,0) [-125|125] "%" Vector__XXX
+ SG_ EngineTorqueReference : 56|8@1- (-125,0) [-125|125] "%" Vector__XXX
+
+BO_ 260095488 Aftertreatment1: 8 Vector__XXX
+ SG_ DieselParticulateFilter1Status : 0|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ DieselOxidationCatalyst1Status : 2|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ DieselExhaustGasRecirculation1Status : 4|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ Aftertreatment1IntakeGasTemp : 8|8@1- (-40,0) [-40|210] "C" Vector__XXX
+ SG_ Aftertreatment1IntakeGasPressure : 16|8@1- (0.05,-125) [-125|125] "kPa" Vector__XXX
+ SG_ Aftertreatment1OutletGasTemp : 24|8@1- (-40,0) [-40|651] "C" Vector__XXX
+ SG_ SCROperatorIntake : 40|4@1- (1,0) [0|15] "" Vector__XXX
+ SG_ Aftertreatment1DieselExhaustFluidTankLevel : 48|8@1- (0.4,0) [0|100] "%" Vector__XXX
+
+BO_ 261455872 AftertreatmentDosing: 8 Vector__XXX
+ SG_ Aftertreatment1DosingValve : 0|4@1- (1,0) [0|15] "" Vector__XXX
+ SG_ Aftertreatment1DieselExhaustFluidQuality : 8|8@1- (0.4,0) [0|100] "%" Vector__XXX
+ SG_ Aftertreatment1DieselExhaustFluidConsumption : 16|16@1- (0.001,0) [0|100] "L/h" Vector__XXX
+ SG_ Aftertreatment1MeteringUnit : 32|4@1- (1,0) [0|15] "" Vector__XXX
+ SG_ SCR1Warning : 40|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ SCR1InductionRestriction : 42|2@1- (1,0) [0|3] "" Vector__XXX
+ SG_ SCR1DieselExhaustFluidTankTemperature : 48|8@1- (-40,0) [-40|210] "C" Vector__XXX
+
+BO_ 261316096 DM1_Active: 8 Vector__XXX
+ SG_ SPN1 : 0|18@1- (1,0) [0|524287] "" Vector__XXX
+ SG_ FMI1 : 18|5@1- (1,0) [0|31] "" Vector__XXX
+ SG_ CM1 : 23|1@1- (1,0) [0|1] "" Vector__XXX
+ SG_ SPN2 : 24|18@1- (1,0) [0|524287] "" Vector__XXX
+ SG_ FMI2 : 42|5@1- (1,0) [0|31] "" Vector__XXX
+ SG_ CM2 : 47|1@1- (1,0) [0|1] "" Vector__XXX
+ SG_ SPN3 : 48|18@1- (1,0) [0|524287] "" Vector__XXX
+ SG_ FMI3 : 66|5@1- (1,0) [0|31] "" Vector__XXX
+ SG_ CM3 : 71|1@1- (1,0) [0|1] "" Vector__XXX
+
+BO_ 260467200 TransportProtocol: 8 Vector__XXX
+ SG_ TP_MessageCount : 0|8@1- (1,0) [0|255] "" Vector__XXX
+ SG_ TP_PacketNumber : 8|8@1- (1,0) [0|255] "" Vector__XXX
+ SG_ TP_Data : 16|48@1- (1,0) [0|281474976710655] "" Vector__XXX
+
+BO_ 261632256 AftertreatmentIntakeGas1: 8 Vector__XXX
+ SG_ Aftertreatment1IntakeGasTemp : 0|8@1- (-40,0) [-40|210] "C" Vector__XXX
+ SG_ Aftertreatment1IntakeGasPressure : 8|16@1- (0.1,-1250) [-1250|1250] "kPa" Vector__XXX
+ SG_ Aftertreatment1IntakeGasMassFlow : 24|16@1- (0.05,0) [0|2500] "kg/h" Vector__XXX
+ SG_ Aftertreatment1IntakeGasValvePosition : 40|8@1- (0.4,0) [0|100] "%" Vector__XXX

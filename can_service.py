@@ -113,6 +113,7 @@ class CANService:
             )
 
             self.notifier = can.Notifier(self.bus, [self.listener])
+            self.listener.start()
             self.is_listening = True
             self._log("Started listening to CAN traffic")
 

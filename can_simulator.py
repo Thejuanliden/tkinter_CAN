@@ -3,7 +3,7 @@ import time
 import random
 import logging
 from typing import Dict, Optional, Callable, Any, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from can_types import CANMessageType, DecodedMessage
 

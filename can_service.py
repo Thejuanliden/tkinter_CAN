@@ -251,6 +251,7 @@ class _CANListener(Listener):
         if not self.running:
             return
 
+        pgn = 0
         if msg.is_extended_id:
             pgn = (msg.arbitration_id >> 8) & 0x3FFFF
             if self.filter_dm1 and pgn == PGN_DM1:
@@ -260,10 +261,21 @@ class _CANListener(Listener):
         dbc_name = None
 
         if self.dbc_decoder:
+            dbc_msg = None
+
             dbc_msg = self.dbc_message_ids.get(msg.arbitration_id)
+
+            if dbc_msg is None and msg.is_extended_id:
+                pf = (msg.arbitration_id >> 16) & 0xFF
+                if pf < 240:
+                    pgn_lookup = pf << 8
+                else:
+                    pgn_lookup = pgn
+                dbc_msg = self.dbc_message_ids.get(pgn_lookup)
+
             if dbc_msg:
                 try:
-                    decoded = self.dbc_msg.decode(msg.data)
+                    decoded = dbc_msg.decode(msg.data)
                     decoded_fields = dict(decoded)
                     dbc_name = dbc_msg.name
                 except Exception as e:

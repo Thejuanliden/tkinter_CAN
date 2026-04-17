@@ -180,11 +180,11 @@ class CANControlPanel:
         if backend == "simulator":
             self.channel_entry.config(state="disabled")
             self.baudrate_entry.config(state="disabled")
-            self._log(f"Switched to simulator backend")
+            self._log("Switched to simulator backend")
         else:
             self.channel_entry.config(state="normal")
             self.baudrate_entry.config(state="normal")
-            self._log(f"Switched to IXXAT backend")
+            self._log("Switched to IXXAT backend")
 
     def _on_filter_change(self):
         if (
@@ -279,6 +279,13 @@ class CANControlPanel:
                 self._can_service = CANService()
                 self._can_service.set_message_callback(self._on_can_message)
                 self._can_service.set_status_callback(self._on_status_message)
+
+                if self._dbc_message_ids:
+                    self._can_service._dbcan_decoder = self._dbcan_decoder
+                    self._can_service._dbc_message_ids = self._dbc_message_ids
+                    self._log(
+                        f"Using loaded DBC with {len(self._dbc_message_ids)} messages"
+                    )
 
                 if self._can_service.connect(channel, baudrate):
                     self.connect_btn.config(text="Disconnect")

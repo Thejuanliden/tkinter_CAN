@@ -13,7 +13,7 @@ class CANControlPanel:
     def __init__(self, root):
         self.root = root
         self.root.title("J1939 CAN Control Panel")
-        self.root.geometry("1000x700")
+        self.root.geometry("1000x800")
 
         self._can_service: Optional[CANService] = None
         self._simulator: Optional[CANSimulator] = None
@@ -115,7 +115,7 @@ class CANControlPanel:
 
         columns = ("timestamp", "can_id", "name", "update", "decoded")
         self.message_tree = ttk.Treeview(
-            tree_frame, columns=columns, show="headings", height=15
+            tree_frame, columns=columns, show="headings", height=10
         )
 
         self.message_tree.heading("timestamp", text="Time")

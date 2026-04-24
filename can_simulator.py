@@ -83,36 +83,42 @@ J1939_SIMULATED_MESSAGES = [
         data_generator=_engine_data_gen,
         period=0.1,
         is_extended=False,
+        name="Engine Data",
     ),
     SimulatedMessage(
         can_id=0x600,
         data_generator=_aftertreatment1_gen,
         period=0.5,
         is_extended=False,
+        name="Aftertreatment 1",
     ),
     SimulatedMessage(
         can_id=0x7E5,
         data_generator=_aftertreatment_dosing_gen,
         period=1.0,
         is_extended=False,
+        name="Aftertreatment Dosing",
     ),
     SimulatedMessage(
-        can_id=0x708,
+        can_id=0x18FECA00,
         data_generator=_dm1_gen,
         period=5.0,
-        is_extended=False,
+        is_extended=True,
+        name="DM1",
     ),
     SimulatedMessage(
         can_id=0x100,
         data_generator=_transport_gen,
         period=0.05,
         is_extended=False,
+        name="Transport",
     ),
     SimulatedMessage(
         can_id=0x700,
         data_generator=_intake_gas_gen,
         period=0.25,
         is_extended=False,
+        name="Intake Gas",
     ),
 ]
 
@@ -222,12 +228,12 @@ class CANSimulator:
                 if current_time >= msg.next_time:
                     data = msg.data_generator()
 
-                    if not self._filter_dm1 and msg.can_id == 0x708:
+                    if not self._filter_dm1 and msg.can_id == 0x18FECA00:
                         msg.next_time = current_time + msg.period
                         continue
 
                     self._emit_message(
-                        msg.can_id, data, msg.is_extended, current_time, ""
+                        msg.can_id, data, msg.is_extended, current_time, msg.name
                     )
                     msg.next_time = current_time + msg.period
 

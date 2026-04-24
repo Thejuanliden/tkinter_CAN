@@ -222,7 +222,7 @@ class CANSimulator:
                 if current_time >= msg.next_time:
                     data = msg.data_generator()
 
-                    if self._filter_dm1 and msg.can_id == 0x708:
+                    if not self._filter_dm1 and msg.can_id == 0x708:
                         msg.next_time = current_time + msg.period
                         continue
 

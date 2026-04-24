@@ -254,7 +254,7 @@ class _CANListener(Listener):
         pgn = 0
         if msg.is_extended_id:
             pgn = (msg.arbitration_id >> 8) & 0x3FFFF
-            if self.filter_dm1 and pgn == PGN_DM1:
+            if not self.filter_dm1 and pgn == PGN_DM1:
                 return
 
         decoded_fields = None
